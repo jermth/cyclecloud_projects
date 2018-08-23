@@ -1,0 +1,277 @@
+
+################################
+## Cluster Configuration File ##
+################################
+
+[cluster fluent]
+FormLayout = selectionpanel
+Category = Applications
+
+Autoscale = $Autoscale
+
+    [[node defaults]]
+    UsePublicNetwork = $UsePublicNetwork
+    Credentials = $Credentials
+    ImageName = $ImageName
+    SubnetId = $SubnetId
+    Region = $Region
+    KeyPairLocation = ~/.ssh/cyclecloud.pem
+
+        [[[cluster-init fluent:default:1.0.0]]]
+        Optional = True
+
+        [[[configuration]]]
+        cyclecloud.cluster.autoscale.idle_time_after_jobs = $IdleTimeAfterJobs
+        cyclecloud.cluster.autoscale.idle_time_before_jobs = $IdleTimeBeforeJobs
+
+
+    [[node master]]
+    MachineType = $MasterMachineType
+    IsReturnProxy = $ReturnProxy
+    AdditionalClusterInitSpecs = $MasterClusterInitSpecs
+
+        [[[configuration]]]
+
+        [[[cluster-init cyclecloud/gridengine:master]]]
+
+        [[[cluster-init fluent:master:1.0.0]]]
+        Optional = True
+
+        [[[network-interface eth0]]]
+        AssociatePublicIpAddress = $UsePublicNetwork
+        StaticPublicIpAddress = true
+
+        [[[volume nfs-1]]]
+        Size = 256
+        SSD = True
+        Mount = nfs
+        Persistent = true
+
+        [[[volume nfs-2]]]
+        Size = 256
+        SSD = True
+        Mount = nfs
+        Persistent = true
+
+        [[[configuration cyclecloud.mounts.nfs]]]
+        mountpoint = /mnt/exports
+        fs_type = ext4
+        raid_level = 0
+
+
+    [[node executedefaults]]
+    Abstract = true
+    MachineType = $ExecuteMachineType
+    Interruptible = $UseLowPrio
+    AdditionalClusterInitSpecs = $ExecuteClusterInitSpecs
+
+    ImageId = $ImageId
+    ImageOS = $ImageOS
+    Azure.SinglePlacementGroup=True # this attribute isn't needed for versions later than 7.5.1
+    InstallJetpack = true
+    AwaitInstallation = true
+    JetpackPlatform = $JetpackPlatform
+    ImageName := undefined
+
+        [[[configuration]]]
+        # If this is a custom Centos image, set selinux to permissive 
+        # as selinux blocks SSH for users if user-home in /shared/home/
+        # which it is by default
+        cyclecloud.selinux.policy = permissive
+
+        [[[cluster-init cyclecloud/gridengine:execute]]]
+        [[[cluster-init fluent:execute:1.0.0]]]
+        Optional = True
+
+        [[[network-interface eth0]]]
+        AssociatePublicIpAddress = $ExecuteNodesPublic
+
+    [[nodearray execute]]
+    Extends = executedefaults
+
+    # The initial number of cores of this type to start when the cluster starts
+    InitialCoreCount= $InitialExecuteCoreCount
+
+    # The maximum number of cores to start when the cluster is configured for autoscaling
+    MaxCoreCount = $MaxExecuteCoreCount
+
+
+[parameters About]
+Order = 1
+
+    [[parameters About This Template]]
+
+        [[[parameter fluent]]]
+        HideLabel = true
+        Config.Plugin = pico.widget.HtmlTemplateWidget
+        Config.Template := "<p>A Grid Engine cluster that uses a custom image for the execute nodes.</p><p>The head node of the cluster uses a standard image.</p>"
+
+[parameters Required Settings]
+Order = 10
+
+    [[parameters Virtual Machines ]]
+    Description = "The cluster, in this case, has two roles: the scheduler master-node with shared filer and the execute hosts. Configure which VM types to use based on the requirements of your application."
+    Order = 20
+
+        [[[parameter Region]]]
+        Label = Region
+        Description = Deployment Location
+        ParameterType = Cloud.Region
+        DefaultValue = eastus
+
+        [[[parameter MasterMachineType]]]
+        Label = Master VM Type
+        Description = The VM type for scheduler master and shared filer.
+        ParameterType = Cloud.MachineType
+        DefaultValue = Standard_DS3_v2
+
+        [[[parameter ExecuteMachineType]]]
+        Label = Execute VM Type
+        Description = The VM type for execute nodes
+        ParameterType = Cloud.MachineType
+        DefaultValue = Standard_H16r
+        Config.Multiselect = true
+
+
+    [[parameters Auto-Scaling]]
+    Description = "The cluster can autoscale to the workload, adding execute hosts as jobs are queued. To enable this check the box below and choose the initial and maximum core counts for the cluster"
+    Order = 30
+
+        [[[parameter Autoscale]]]
+        Label = Autoscale
+        DefaultValue = true
+        Widget.Plugin = pico.form.BooleanCheckBox
+        Widget.Label = Start and stop execute instances automatically
+
+        [[[parameter InitialExecuteCoreCount]]]
+        Label = Initial Cores
+        Description = The initial number of execute cores to start. Note that these initial nodes are not "persistent". They will still autostop of no jobs are submitted
+        DefaultValue = 0
+        Config.Plugin = pico.form.NumberTextBox
+        Config.MinValue = 0
+        Config.IntegerOnly = true
+        Hidden = true
+
+        [[[parameter MaxExecuteCoreCount]]]
+        Label = Max Cores
+        Description = The total number of execute cores to start
+        DefaultValue = 100
+        Config.Plugin = pico.form.NumberTextBox
+        Config.MinValue = 1
+        Config.IntegerOnly = true
+
+        [[[parameter UseLowPrio]]]
+        Label = Low Priority
+        DefaultValue = false
+        Widget.Plugin = pico.form.BooleanCheckBox
+        Widget.Label = Use low priority instances for execute hosts
+
+    [[parameters Networking]]
+    Order = 40
+
+        [[[parameter SubnetId]]]
+        Label = Subnet ID
+        Description = Subnet Resource Path (ResourceGroup/VirtualNetwork/Subnet)
+        ParameterType = Azure.Subnet
+        Required = True
+
+
+[parameters Advanced Settings]
+Order = 20
+
+    [[parameters Azure Settings]]
+    Order = 10
+
+        [[[parameter Credentials]]]
+        Description = The credentials for the cloud provider
+        ParameterType = Cloud.Credentials
+
+    [[parameters Fluent Settings ]]
+    Description = "Section for configuring fluent"
+    Order = 5
+    Hidden = true
+
+    [[parameters Software]]
+    Description = "Specify the scheduling software, and base OS installed on all nodes, and optionally the cluster-init and chef versions from your Locker."
+    Order = 10
+
+        [[[parameter ImageName]]]
+        Label = Base OS
+        ParameterType = Cloud.Image
+        Config.OS = linux
+        DefaultValue = cycle.image.centos7
+
+        [[[parameter MasterClusterInitSpecs]]]
+        Label = Master Cluster-Init
+        DefaultValue = =undefined
+        Description = Cluster init specs to apply to the master node
+        ParameterType = Cloud.ClusterInitSpecs
+
+        [[[parameter ExecuteClusterInitSpecs]]]
+        Label = Execute Cluster-Init
+        DefaultValue = =undefined
+        Description = Cluster init specs to apply to execute nodes
+        ParameterType = Cloud.ClusterInitSpecs
+
+
+    [[parameters Custom Image]]
+    Description = "For specifying a custom image to be used in a new GridEngine resource type. To use this, add "-l slot_type=normal" in the SGE job submission"
+    Order = 12
+
+        [[[parameter ImageId]]]
+        Label = ImageId
+        Description = Resource ID for the custom image
+        Required = true
+
+        [[[parameter ImageOS]]]
+        Label = ImageOS
+        DefaultValue = Linux
+        Description = OS of the custom image (windows/linux)
+
+        [[[parameter JetpackPlatform]]]
+        Label = OS Platform
+        Description = The specific OS for installing the correct jetpack daemon (e.g: centos-7, ubuntu-14)
+        DefaultValue = centos-7
+
+
+    [[parameters Advanced Autoscaling]]
+    Description = Advanced autoscaling settings
+    Order = 14
+
+        [[[parameter IdleTimeBeforeJobs]]]
+        Label = Idle Time Before jobs
+        Description = The amount of time in seconds that a node waits before a job is assigned to it.
+        DefaultValue = 1800
+        Config.Plugin = pico.form.NumberTextBox
+        Config.IntegerOnly = true
+        Hidden = true
+
+        [[[parameter IdleTimeAfterJobs]]]
+        Label = Idle Time After jobs
+        Description = The amount of time in seconds that a node waits after running jobs.
+        DefaultValue = 900
+        Config.Plugin = pico.form.NumberTextBox
+        Config.IntegerOnly = true
+        Hidden = true
+
+    [[parameters Advanced Networking]]
+    Description = Advanced networking settings
+
+        [[[parameter ReturnProxy]]]
+        Label = Return Proxy
+        DefaultValue = true
+        ParameterType = Boolean
+        Config.Label = Use SSH tunnel to connect to CycleCloud (required if direct access is blocked)
+
+        [[[parameter UsePublicNetwork]]]
+        Label = Public Head Node
+        DefaultValue = true
+        ParameterType = Boolean
+        Config.Label = Access master node from the Internet
+
+        [[[parameter ExecuteNodesPublic]]]
+        Label = Public Execute
+        DefaultValue = false
+        ParameterType = Boolean
+        Config.Label = Access execute nodes from the Internet
+        Conditions.Excluded := UsePublicNetwork isnt true
